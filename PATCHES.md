@@ -1,8 +1,22 @@
 # GPL Full-Features Build Patches
 
 This fork unlocks features that the upstream Serial-Studio source disables in
-GPL builds (Audio / CAN Bus / Modbus / USB / HID / Process / MQTT drivers and
-console export to file). All changes are limited to:
+GPL builds. v3.2.7.3 covers:
+
+- **IO drivers** — Audio, CANBus, Modbus, USB, HID, Process (in addition to
+  stock UART/Network/BluetoothLE)
+- **MQTT** publisher/subscriber (Qt6::Mqtt, built from source separately)
+- **Plot 3D widget** (Qt Quick3D scatter)
+- **Image View widget** (live camera/image feed; ImageExport zip recording
+  stays commercial-only because it depends on QuaZip)
+- **DBC Importer** (CAN database file parsing)
+- **XY Plot mode** (phase diagrams via dataset `xAxisId`)
+- **Binary Direct mode** (`FrameDetection::NoDelimiters` — already in
+  upstream GPL; documented here for completeness)
+- **Console Export to file** (synchronous per-device .txt writer; the
+  upstream branch was a Pro-only stub)
+
+All changes are limited to:
 
 - Removing or relocating `#ifdef BUILD_COMMERCIAL` guards around code that is
   already in the GPL source tree.
@@ -99,15 +113,18 @@ Output: `build/Serial-Studio-GPL3-v3.2.7.msi`, MSI installs as
 
 These features are not unlocked because their actual implementation is **not**
 in the public GPL source — only Pro stubs / dialogs are. Adding them would
-mean writing the implementation from scratch.
+mean writing the implementation from scratch, or they live in upstream master
+(newer than v3.2.7) and require a base rebase.
 
 - MDF4 export (`Console/Export.cpp` Pro branch writes the file format; GPL has
   a stub. Reader / writer code lives in `lib/mdflib`, which is open source, so
   a GPL implementation is possible but non-trivial.)
 - License management UI, Trial timer, Lemon Squeezy activation
-- Plot 3D widget, ImageView dashboard widget, in-line image export
-- DBC importer (CAN database file parsing)
-- AI-Assistant integration
+- ImageExport zip recording (depends on QuaZip; the ImageView display widget
+  itself **is** unlocked, but the zip-archive export pipeline is not)
+- AI-Assistant integration (upstream master only)
+- Waterfall widget, Painter widget, MQTT Publisher, Sessions, ShortcutGenerator
+  (all upstream-master only — not in v3.2.7)
 
 ## What does not work yet
 
