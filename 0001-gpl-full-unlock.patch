@@ -1,24 +1,23 @@
-From 72894ac92520d8bd23cbc14b5dfe53a759d22f69 Mon Sep 17 00:00:00 2001
+From 46e85ff794077373c20291a2d88b9eadf5df399f Mon Sep 17 00:00:00 2001
 From: luocanli <astro8818163@gmail.com>
 Date: Mon, 18 May 2026 14:18:47 +0800
 Subject: [PATCH] Unlock GPL build: drivers, MQTT, Plot3D, ImageView, DBC, XY
  Plot, Console Export
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
 
 Patches upstream Serial-Studio v3.2.7 so the GPLv3 build exposes:
 - All IO drivers: Audio, CANBus, Modbus, USB, HID, Process (plus stock UART/Net/BLE)
 - MQTT publisher/subscriber (Qt6::Mqtt, built from source separately)
-- Plot 3D widget (Qt Quick3D scatter)
+- Plot 3D widget (Qt Quick3D scatter, full data pipeline)
 - Image View widget (live camera/image feed; export-to-zip stays Pro)
 - DBC importer (CAN database file parsing)
 - XY Plot mode (phase diagrams via dataset xAxisId)
-- Binary Direct mode (FrameDetection::NoDelimiters — already in upstream GPL)
+- Binary Direct mode (already in upstream GPL)
 - Synchronous Console Export to per-device .txt files
 
 Stays Pro-only: license UI, MDF4 export, ImageExport zip recording,
 AI assistant, gRPC API for unlocked drivers. See PATCHES.md.
+
+Build: 3.2.7.5
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ---
@@ -44,18 +43,19 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
  app/src/MQTT/Client.cpp                            |  18 ++-
  app/src/Misc/ModuleManager.cpp                     |  52 +++++---
  app/src/SerialStudio.h                             |  16 +--
- app/src/UI/Dashboard.cpp                           |  14 +-
+ app/src/UI/Dashboard.cpp                           |  44 +------
  app/src/UI/Dashboard.h                             |   4 -
+ app/src/UI/DashboardWidget.cpp                     |   8 +-
  app/src/UI/ImageProvider.cpp                       |   6 +-
  app/src/UI/ImageProvider.h                         |  12 +-
  app/src/UI/Widgets/ImageView.cpp                   |  25 ++--
  app/src/UI/Widgets/ImageView.h                     |  10 +-
  app/src/UI/Widgets/Plot.cpp                        |  34 ++---
- 29 files changed, 487 insertions(+), 316 deletions(-)
+ 30 files changed, 492 insertions(+), 349 deletions(-)
  create mode 100644 PATCHES.md
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 715eeaa..44a5e17 100644
+index 715eeaa..1da52ed 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -181,7 +181,8 @@ set(PROJECT_DESCRIPTION_SUMMARY "Flexible data visualization software for embedd
@@ -63,7 +63,7 @@ index 715eeaa..44a5e17 100644
  set(PROJECT_VERSION_MINOR       "2")
  set(PROJECT_VERSION_PATCH       "7")
 -set(PROJECT_VERSION             "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
-+set(PROJECT_VERSION_BUILD       "3")
++set(PROJECT_VERSION_BUILD       "5")
 +set(PROJECT_VERSION             "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}.${PROJECT_VERSION_BUILD}")
  set(PROJECT_APPCAST             "https://raw.githubusercontent.com/Serial-Studio/Serial-Studio/master/updates.json")
  set(PROJECT_DESCRIPTION_FILE    "${PROJECT_ROOT_DIR}/README.md")
@@ -1480,7 +1480,7 @@ index e41cf46..b277c4f 100644
    Q_ENUM(DashboardWidget)
  
 diff --git a/app/src/UI/Dashboard.cpp b/app/src/UI/Dashboard.cpp
-index 7716895..dc74b03 100644
+index 7716895..2eb99f7 100644
 --- a/app/src/UI/Dashboard.cpp
 +++ b/app/src/UI/Dashboard.cpp
 @@ -211,14 +211,9 @@ bool UI::Dashboard::showTaskbarButtons() const noexcept
@@ -1547,6 +1547,95 @@ index 7716895..dc74b03 100644
  #endif
  
    // Preserve per-source structure cache across the widget reset so that
+@@ -1458,9 +1448,7 @@ void UI::Dashboard::updateDataSeries(int sourceId)
+   const int fftCount   = widgetCount(SerialStudio::DashboardFFT);
+   const int plotCount  = widgetCount(SerialStudio::DashboardPlot);
+   const int multiCount = widgetCount(SerialStudio::DashboardMultiPlot);
+-#ifdef BUILD_COMMERCIAL
+   const int plot3DCount = widgetCount(SerialStudio::DashboardPlot3D);
+-#endif
+ 
+   // Resize data points if needed
+   if (m_gpsValues.size() != gpsCount) [[unlikely]]
+@@ -1471,10 +1459,8 @@ void UI::Dashboard::updateDataSeries(int sourceId)
+     configureLineSeries();
+   if (m_multipltValues.size() != multiCount) [[unlikely]]
+     configureMultiLineSeries();
+-#ifdef BUILD_COMMERCIAL
+   if (m_plotData3D.size() != plot3DCount) [[unlikely]]
+     configurePlot3DSeries();
+-#endif
+ 
+   // Update GPS data
+   for (int i = 0; i < gpsCount; ++i) {
+@@ -1532,16 +1518,8 @@ void UI::Dashboard::updateDataSeries(int sourceId)
+       m_yAxisData[yDataset.index].push(yDataset.numericValue);
+     }
+ 
+-    // Shift X-axis points
+-#ifdef BUILD_COMMERCIAL
+-    const auto& tk = Licensing::CommercialToken::current();
+-    auto xAxisId =
+-      (tk.isValid() && SS_LICENSE_GUARD() && tk.featureTier() >= Licensing::FeatureTier::Trial)
+-        ? yDataset.xAxisId
+-        : 0;
+-#else
+-    auto xAxisId = 0;
+-#endif
++    // Shift X-axis points (XY plot mode unlocked in GPL build)
++    auto xAxisId = yDataset.xAxisId;
+     if (m_datasets.contains(xAxisId) && !xAxesMoved.contains(xAxisId)) {
+       xAxesMoved.insert(xAxisId);
+       const auto& xDataset = m_datasets[xAxisId];
+@@ -1564,7 +1542,6 @@ void UI::Dashboard::updateDataSeries(int sourceId)
+   }
+ 
+   // Update 3D plots
+-#ifdef BUILD_COMMERCIAL
+   for (int i = 0; i < plot3DCount; ++i) {
+     const auto& group = getGroupWidget(SerialStudio::DashboardPlot3D, i);
+     if (sourceId >= 0 && group.sourceId != sourceId)
+@@ -1588,7 +1565,6 @@ void UI::Dashboard::updateDataSeries(int sourceId)
+     if (plotData.size() > maxPoints)
+       plotData.erase(plotData.begin(), plotData.end() - maxPoints);
+   }
+-#endif
+ }
+ 
+ /**
+@@ -1684,15 +1660,7 @@ void UI::Dashboard::configureFftSeries()
+  */
+ void UI::Dashboard::registerXAxisIfNeeded(const DataModel::Dataset& dataset)
+ {
+-#ifdef BUILD_COMMERCIAL
+-  const auto& tk = Licensing::CommercialToken::current();
+-  if (!tk.isValid() || !SS_LICENSE_GUARD() || tk.featureTier() < Licensing::FeatureTier::Trial)
+-    return;
+-#else
+-  Q_UNUSED(dataset);
+-  return;
+-#endif
+-
++  // XY plot (custom X-axis source) unlocked in GPL build
+   const int xSource = dataset.xAxisId;
+   if (m_xAxisData.contains(xSource))
+     return;
+@@ -1782,7 +1750,6 @@ void UI::Dashboard::configureLineSeries()
+   }
+ }
+ 
+-#ifdef BUILD_COMMERCIAL
+ /**
+  * @brief Initializes internal data structures for 3D trajectory plot widgets.
+  *
+@@ -1806,7 +1773,6 @@ void UI::Dashboard::configurePlot3DSeries()
+     m_plotData3D[i].shrink_to_fit();
+   }
+ }
+-#endif
+ 
+ /**
+  * @brief Configures the multi-line series data structure for the dashboard.
 diff --git a/app/src/UI/Dashboard.h b/app/src/UI/Dashboard.h
 index 1784ca7..5f2e74b 100644
 --- a/app/src/UI/Dashboard.h
@@ -1571,6 +1660,39 @@ index 1784ca7..5f2e74b 100644
  
    QMap<int, QTimer*> m_timers;
    QMap<int, int> m_repeatCounters;
+diff --git a/app/src/UI/DashboardWidget.cpp b/app/src/UI/DashboardWidget.cpp
+index 151f7f5..939b2cc 100644
+--- a/app/src/UI/DashboardWidget.cpp
++++ b/app/src/UI/DashboardWidget.cpp
+@@ -36,10 +36,8 @@
+ #include "UI/Widgets/MultiPlot.h"
+ #include "UI/Widgets/Plot.h"
+ 
+-#ifdef BUILD_COMMERCIAL
+-#  include "UI/Widgets/ImageView.h"
+-#  include "UI/Widgets/Plot3D.h"
+-#endif
++#include "UI/Widgets/Plot3D.h"
++#include "UI/Widgets/ImageView.h"
+ 
+ //--------------------------------------------------------------------------------------------------
+ // Constructor & destructor
+@@ -262,7 +260,6 @@ void UI::DashboardWidget::setWidgetIndex(const int index)
+         m_dbWidget = new Widgets::LEDPanel(relativeIndex(), this);
+         m_qmlPath  = "qrc:/serial-studio.com/gui/qml/Widgets/Dashboard/LEDPanel.qml";
+         break;
+-#ifdef BUILD_COMMERCIAL
+       case SerialStudio::DashboardPlot3D:
+         m_dbWidget = new Widgets::Plot3D(relativeIndex(), this);
+         m_qmlPath  = "qrc:/serial-studio.com/gui/qml/Widgets/Dashboard/Plot3D.qml";
+@@ -271,7 +268,6 @@ void UI::DashboardWidget::setWidgetIndex(const int index)
+         m_dbWidget = new Widgets::ImageView(relativeIndex(), this);
+         m_qmlPath  = "qrc:/serial-studio.com/gui/qml/Widgets/Dashboard/ImageView.qml";
+         break;
+-#endif
+ 
+       default:
+         break;
 diff --git a/app/src/UI/ImageProvider.cpp b/app/src/UI/ImageProvider.cpp
 index 4004f94..f876fc0 100644
 --- a/app/src/UI/ImageProvider.cpp
