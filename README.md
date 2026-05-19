@@ -1,5 +1,7 @@
 # Serial-Studio GPL Full-Features Patches
 
+**English** | [中文](README.zh-CN.md)
+
 This repository holds a single Git patch that unlocks the driver panels,
 Console Export and MQTT support in a GPLv3 build of
 [Serial-Studio](https://github.com/Serial-Studio/Serial-Studio) v3.2.7.
